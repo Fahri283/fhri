@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Lope Banyak-banyak</title>
+<style>
+  :root{
+    --bg:#0f172a;
+    --panel: rgba(255,255,255,0.06);
+  }
+  html,body{
+    height:100%;
+    margin:0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    background: linear-gradient(180deg,#071028 0%, var(--bg) 100%);
+    overflow:hidden;
+    color:#fff;
+  }
+
+  /* panel kontrol */
+  .controls{
+    position:fixed;
+    left:12px;
+    top:12px;
+    z-index:9999;
+    background:var(--panel);
+    backdrop-filter: blur(6px);
+    padding:10px;
+    border-radius:10px;
+    box-shadow: 0 6px 18px rgba(2,6,23,0.6);
+    display:flex;
+    gap:8px;
+    align-items:center;
+  }
+  .controls input[type=range]{ width:150px; }
+  .controls button{
+    background:transparent;
+    border:1px solid rgba(255,255,255,0.12);
+    color:inherit;
+    padding:6px 10px;
+    border-radius:8px;
+    cursor:pointer;
+  }
+  .controls button:active{ transform:translateY(1px); }
+
+  /* kontainer hati */
+  .sky{
+    width:100%;
+    height:100%;
+    position:relative;
+    perspective:1000px;
+    overflow:hidden;
+  }
+
+  /* dasar bentuk hati: dibuat dengan rotasi + 2 lingkaran pseudo */
+  .heart{
+    position:absolute;
+    width:60px; /* akan diubah via inline style */
+    height:60px;
+    transform: rotate(-45deg);
+    transform-origin: center;
+    will-change: transform, opacity, top, left;
+    pointer-events: auto;
+    filter: drop-shadow(0 6px 12px rgba(0,0,0,0.35));
+  }
+  .heart .piece{
+    width:100%;
+    height:100%;
+    background:currentColor;
+    position:relative;
+    border-radius:8px;
+  }
+  .heart .piece::before,
+  .heart .piece::after{
+    content:"";
+    position:absolute;
+    width:100%;
+    height:100%;
+    background:currentColor;
+    border-radius:50%;
+    left:0;
+    top:0;
+  }
+  .heart .piece::before{ top:-50%; left:0; }
+  .heart .piece::after{ left:50%; top:0; }
+
+  /* animasi melayang/naik */
+  @keyframes floatUp {
+    0%   { transform: translateY(0) rotate(-45deg) scale(0.9); opacity:0.95; }
+    10%  { opacity:1; }
+    50%  { transform: translateY(-40vh) rotate(-45deg) scale(1.02); }
+    100% { transform: translateY(-110vh) rotate(-45deg) scale(0.9); opacity:0; }
+  }
+
+  /* kecilkan pointer overlay */
+  .hint{
+    position:fixed;
+    right:12px;
+    top:12px;
+    color:rgba(255,255,255,0.65);
+    z-index:9998;
+    font-size:13px;
+    background:transparent;
+    padding:8px 10px;
+    border-radius:8px;
+    border:1px solid rgba(255,255,255,0.04);
+  }
+
+  /* tombol tambah di tengah bawah */
+  .bottom-actions{
+    position:fixed;
+    left:50%;
+    transform:translateX(-50%);
+    bottom:18px;
+    z-index:9999;
+    display:flex;
+    gap:8px;
+  }
+
+  .muted{
+    opacity:0.8;
+    font-size:13px;
+  }
+
+  /* responsive tweak */
+  @media (max-width:520px){
+    .controls{ padding:8px; gap:6px; }
+    .controls input[type=range]{ width:110px; }
+  }
+
+</style>
+</head>
+<body>
+
+<div class="controls" aria-hidden="false">
+  <label class="muted">Jumlah:</label>
+  <input id="countRange" type="range" min="0" max="2000" value="200" step="10" />
+  <span id="countLabel" style="min-width:48px;text-align:right;font-weight:600">200</span>
+  <button id="addBtn">+ Tambah 200</button>
+  <button id="clearBtn">Bersihkan</button>
+</div>
+
+<div class="hint">Klik hati untuk meledak (hilang).</div>
+
+<div class="sky" id="sky"></div>
+
+<div class="bottom-actions">
+  <button id="massBtn">Buat sebanyaknya (max 2000)</button>
+  <button id="burstBtn">Burst 100</button>
+</div>
+
+<script>
+/*
+  Script ini membuat banyak hati secara dinamis.
+  - Default membuat jumlah sesuai slider (default 200)
+  - Animasi floatUp membuat hati naik dan hilang
+  - Klik pada hati akan menghapusnya
+  - Kontrol untuk menambah, clear, dan membuat "sebanyaknya"
+*/
+
+const sky = document.getElementById('sky');
+const range = document.getElementById('countRange');
+const label = document.getElementById('countLabel');
+const addBtn = document.getElementById('addBtn');
+const clearBtn = document.getElementById('clearBtn');
+const massBtn = document.getElementById('massBtn');
+const burstBtn = document.getElementById('burstBtn');
+
+let currentHearts = 0;
+const MAX_HEARTS = 2000; // batas aman supaya browser gak crash
+
+function rand(min, max){ return Math.random()*(max-min)+min; }
+function randInt(min,max){ return Math.floor(rand(min,max+1)); }
+
+function randomColor(){
+  // palet warna ceria
+  const pal = [
+    "#ff5d8f","#ff8fa3","#ffb0c7","#ffd166","#ff9f1c",
+    "#6ee7b7","#60a5fa","#8b5cf6","#f472b6","#fb7185",
+    "#34d399","#f97316","#60a5fa","#38bdf8"
+  ];
+  return pal[randInt(0,pal.length-1)];
+}
+
+function createHeart(opts = {}){
+  const heart = document.createElement('div');
+  heart.className = 'heart';
+  const piece = document.createElement('div');
+  piece.className = 'piece';
+  heart.appendChild(piece);
+
+  const vw = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
+  const vh = Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0);
+
+  // random ukuran, posisi, color, duration, delay
+  const size = opts.size ?? randInt(18, 90); // px
+  heart.style.width = size + 'px';
+  heart.style.height = size + 'px';
+
+  // posisi awal acak di area bawah (agar mengambang ke atas)
+  const left = opts.left ?? rand(0, vw - size);
+  const top = opts.top ?? rand(vh*0.65, vh - size);
+  heart.style.left = left + 'px';
+  heart.style.top = top + 'px';
+
+  // warna
+  const color = opts.color ?? randomColor();
+  heart.style.color = color;
+
+  // animasi duration dan delay bervariasi
+  const dur = opts.duration ?? rand(6, 18); // seconds
+  const delay = opts.delay ?? rand(0, 6); // seconds
+  heart.style.animation = `floatUp ${dur}s linear ${delay}s forwards`;
+
+  // sedikit rotasi kecil variatif via transform (ditambahkan ke keyframe)
+  const rot = rand(-12,12);
+  heart.style.transform = `rotate(${rot}deg)`;
+
+  // klik untuk meledak/hilang
+  heart.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    // beri animasi scale out
+    heart.style.transition = 'transform .25s ease, opacity .25s ease';
+    heart.style.transform += ' scale(1.6)';
+    heart.style.opacity = '0';
+    setTimeout(()=>{ if(heart.parentNode) heart.parentNode.removeChild(heart); currentHearts--; label.textContent = currentHearts; }, 260);
+  });
+
+  // when animation ends, remove from DOM and update counter
+  heart.addEventListener('animationend', ()=>{
+    if(heart.parentNode) heart.parentNode.removeChild(heart);
+    currentHearts = Math.max(0, currentHearts-1);
+    label.textContent = currentHearts;
+  });
+
+  // append
+  sky.appendChild(heart);
+  currentHearts++;
+  label.textContent = currentHearts;
+}
+
+// buat banyak sekaligus (batch) dengan jeda microtask untuk menghindari freeze
+async function createMany(count){
+  const batch = 120; // buat per batch supaya UI responsive
+  let made = 0;
+  while(made < count && currentHearts < MAX_HEARTS){
+    const toMake = Math.min(batch, count-made, MAX_HEARTS-currentHearts);
+    for(let i=0;i<toMake;i++){
+      createHeart();
+    }
+    made += toMake;
+    // tunggu satu tick agar browser sempat render (mengurangi lag)
+    await new Promise(r => setTimeout(r, 20));
+  }
+}
+
+range.addEventListener('input', ()=>{
+  label.textContent = range.value;
+});
+
+addBtn.addEventListener('click', ()=> {
+  const add = Math.min(200, MAX_HEARTS - currentHearts);
+  createMany(add);
+});
+
+clearBtn.addEventListener('click', ()=>{
+  // hapus semua hati
+  sky.querySelectorAll('.heart').forEach(h => h.remove());
+  currentHearts = 0;
+  label.textContent = currentHearts;
+});
+
+massBtn.addEventListener('click', ()=>{
+  // buat sebanyak mungkin sampai batas MAX_HEARTS
+  const want = MAX_HEARTS - currentHearts;
+  if(want > 0) createMany(want);
+});
+
+burstBtn.addEventListener('click', ()=>{
+  createMany(100);
+});
+
+// inisialisasi: buat sesuai slider value at startup
+window.addEventListener('load', ()=> {
+  const initial = parseInt(range.value,10) || 200;
+  createMany(initial);
+});
+
+// juga buat hearts kalau area diklik (interaktif)
+sky.addEventListener('click', (e)=>{
+  // buat 6 hati di sekitar klik
+  const rect = sky.getBoundingClientRect();
+  const cx = e.clientX - rect.left;
+  const cy = e.clientY - rect.top;
+  const count = 6;
+  for(let i=0;i<count;i++){
+    createHeart({
+      left: cx + rand(-30,30),
+      top: cy + rand(-10,10),
+      size: randInt(12,60),
+      color: randomColor(),
+      duration: rand(5,12),
+      delay: 0
+    });
+  }
+});
+</script>
+</body>
+</html>
